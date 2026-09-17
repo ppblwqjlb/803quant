@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   Bell,
@@ -14,22 +14,23 @@ import {
   Database,
   FileText,
   Gauge,
-  LayoutDashboard,
   Landmark,
+  LayoutDashboard,
   ListFilter,
   LoaderCircle,
   Menu,
   Receipt,
   RefreshCw,
   ShieldAlert,
-  TrendingUp,
   WalletCards,
   X,
-  Zap,
 } from "lucide-react";
 import { HomePage } from "./home-page";
 import { IPOPage } from "./ipo-page";
 import { MotionController } from "./motion-controller";
+import { StrategyPage, emptyStrategyResearchData } from "./strategy-page";
+import { TodayPage, emptyTodayResearchData } from "./today-page";
+import { PageHeading, useAccessibleOverlay } from "./ui-blocks";
 import { useResearchModule, type ResearchResponse } from "./use-research-module";
 import { useServerContext } from "./use-server-context";
 import type { SystemContext } from "../lib/server/system-context";
@@ -42,47 +43,12 @@ import {
   validateRedemptionCode,
 } from "../lib/prototype-model.mjs";
 import { displayValue } from "../lib/research/contracts";
-import { keepsAvailableResearchRows, researchDisplayState } from "./ipo-adapters";
 
 type PageId = "home" | "today" | "risk" | "strategy" | "ipo" | "membership";
-type StrategyView = "official" | "near";
 type PlanId = "monthly" | "quarterly" | "yearly";
 type PaymentState = "idle" | "processing" | "success" | "failed";
 type MembershipMode = "purchase" | "redeem";
 type RedeemState = "idle" | "validating" | "success" | "invalid";
-
-type Candidate = {
-  id: string;
-  name: string;
-  code: string;
-  market: string;
-  sector: string;
-  view: StrategyView;
-  score: string;
-  close: string;
-  change: string;
-  gap: string;
-  volumeRatio: string;
-  tableSignals: string[][];
-  metrics: string[][];
-  setup: string;
-  reason: string;
-  evidence: string[][];
-};
-
-type IntelItem = {
-  id: string;
-  author: string;
-  avatar: string;
-  kind: string;
-  action: string;
-  sector: string;
-  time: string;
-  title: string;
-  body: string;
-  change: string;
-  importance: string;
-};
 
 const NAV_ITEMS = [
   { id: "today", label: "今日决策台", mobile: "今日", icon: LayoutDashboard },
@@ -92,44 +58,29 @@ const NAV_ITEMS = [
   { id: "membership", label: "会员服务", mobile: "我的", icon: Crown },
 ] as const;
 
-
 type ResearchRecord = Record<string, unknown>;
-type TodayData = { snapshot: ResearchRecord | null; riskSnapshot: ResearchRecord | null; strategyRun: ResearchRecord | null; strategyCandidates: ResearchRecord[]; intelItems: ResearchRecord[]; events: ResearchRecord[] };
 type RiskData = { snapshot: ResearchRecord | null; signals: ResearchRecord[] };
-type StrategyData = { definition: ResearchRecord | null; run: ResearchRecord | null; funnel: ResearchRecord[]; candidates: ResearchRecord[] };
 
-const emptyTodayData = (): TodayData => ({ snapshot: null, riskSnapshot: null, strategyRun: null, strategyCandidates: [], intelItems: [], events: [] });
 const emptyRiskData = (): RiskData => ({ snapshot: null, signals: [] });
-const emptyStrategyData = (): StrategyData => ({ definition: null, run: null, funnel: [], candidates: [] });
-const researchStatus = (loading: boolean, response: ResearchResponse<unknown>) => loading ? "pending" : response.status;
-const record = (value: unknown): ResearchRecord => value && typeof value === "object" && !Array.isArray(value) ? value as ResearchRecord : {};
-const rows = (value: unknown): string[][] => Array.isArray(value) ? value.map((item) => Array.isArray(item) ? item.map(displayValue) : Object.values(record(item)).map(displayValue)) : [];
+const researchStatus = (loading: boolean, response: ResearchResponse<unknown>) => (loading ? "pending" : response.status);
+const record = (value: unknown): ResearchRecord => (value && typeof value === "object" && !Array.isArray(value) ? value as ResearchRecord : {});
+const rows = (value: unknown): string[][] => (Array.isArray(value) ? value.map((item) => (Array.isArray(item) ? item.map(displayValue) : Object.values(record(item)).map(displayValue))) : []);
 const researchValue = (item: ResearchRecord | null | undefined, key: string) => displayValue(item?.[key]);
 const asBoolean = (value: unknown) => value === true || value === 1 || value === "1" || value === "true";
 
-function toCandidate(item: ResearchRecord): Candidate {
-  return {
-    id: researchValue(item, "id"), name: researchValue(item, "name"), code: researchValue(item, "tsCode"), market: researchValue(item, "market"), sector: researchValue(item, "industry"),
-    view: item.candidateType === "near" ? "near" : "official", score: researchValue(item, "matchScore"), close: researchValue(item, "closePrice"), change: researchValue(item, "changeRatePct"),
-    gap: researchValue(item, "gapRatePct"), volumeRatio: researchValue(item, "volumeRatio"), tableSignals: [["缺口", researchValue(item, "gapRatePct")], ["量比", researchValue(item, "volumeRatio")]],
-    metrics: [["跳空幅度", researchValue(item, "gapRatePct")], ["量比", researchValue(item, "volumeRatio")], ["策略匹配", researchValue(item, "matchScore")]],
-    setup: researchValue(item, "setupLabel"), reason: researchValue(item, "reasonText"), evidence: rows(item.evidence),
-  };
-}
-
 export function PrototypeApp({ initialContext }: { initialContext: SystemContext }) {
   const context = useServerContext(initialContext);
-  const todayResearch = useResearchModule("/api/research/today", emptyTodayData);
+  const todayResearch = useResearchModule("/api/research/today", emptyTodayResearchData);
   const riskResearch = useResearchModule("/api/research/risk", emptyRiskData);
-  const strategyResearch = useResearchModule("/api/research/strategy", emptyStrategyData);
+  const strategyResearch = useResearchModule("/api/research/strategy", emptyStrategyResearchData);
   const [page, setPage] = useState<PageId>("home");
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [membershipMode, setMembershipMode] = useState<MembershipMode>("purchase");
   const [navigationSequence, setNavigationSequence] = useState(0);
   const productNavRef = useRef<HTMLElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const pendingNavigationRef = useRef<PageId | null>(null);
+  const dataAsOf = todayResearch.response.dataAsOf;
 
   useEffect(() => {
     const syncHash = () => {
@@ -182,11 +133,6 @@ export function PrototypeApp({ initialContext }: { initialContext: SystemContext
     if (window.location.hash !== `#${next}`) window.history.pushState(null, "", `#${next}`);
   };
 
-  const openCandidate = (candidate: Candidate) => {
-    setSelectedCandidate(candidate);
-    navigate("strategy");
-  };
-
   return (
     <div className="app-frame risk-theme-ready">
       <MotionController />
@@ -203,7 +149,7 @@ export function PrototypeApp({ initialContext }: { initialContext: SystemContext
               <button
                 type="button"
                 key={item.id}
-                className={page === item.id ? "top-nav-item active" : "top-nav-item"}
+                className={page === item.id ? "top-nav-item active" : ""}
                 aria-current={page === item.id ? "page" : undefined}
                 onClick={() => navigate(item.id)}
               >
@@ -234,26 +180,24 @@ export function PrototypeApp({ initialContext }: { initialContext: SystemContext
       ) : (
         <div className="product-workspace">
           <div className="product-statusbar">
-            <div className="market-status"><span className="status-dot" /><strong>{context.serverDate} · 收盘后</strong><span>全市场数据已完成</span></div>
-            <span>覆盖沪深主板、创业板、科创板</span>
+            <div className="market-status">
+              <span className="status-dot" />
+              <strong>{context.serverDate} · 盘后</strong>
+              <span>{dataAsOf ? `行情数据截至 ${dataAsOf}` : "等待当日批次入仓"}</span>
+            </div>
+            <span>覆盖沪深主板、创业板、科创板、北交所</span>
           </div>
           <main className="page-content">
           {page === "today" && (
             <TodayPage
               compactDate={context.compactDate}
-              onRisk={() => navigate("risk")}
               onStrategy={() => navigate("strategy")}
-              onCandidate={openCandidate}
-              today={todayResearch.response}
-              todayLoading={todayResearch.loading}
-              risk={riskResearch.response}
-              strategy={strategyResearch.response}
+              response={todayResearch.response}
+              loading={todayResearch.loading}
             />
           )}
           {page === "risk" && <RiskPage compactDate={context.compactDate} response={riskResearch.response} loading={riskResearch.loading} />}
-          {page === "strategy" && (
-            <StrategyPage selected={selectedCandidate} onSelected={setSelectedCandidate} compactDate={context.compactDate} response={strategyResearch.response} loading={strategyResearch.loading} />
-          )}
+          {page === "strategy" && <StrategyPage compactDate={context.compactDate} response={strategyResearch.response} loading={strategyResearch.loading} />}
           {page === "ipo" && <IPOPage context={context} />}
           {page === "membership" && (
             <MembershipPage
@@ -285,142 +229,6 @@ export function PrototypeApp({ initialContext }: { initialContext: SystemContext
         })}
       </nav>}
 
-    </div>
-  );
-}
-
-function PageHeading({ eyebrow, title, description, right }: { eyebrow: string; title: string; description: string; right?: React.ReactNode }) {
-  return (
-    <div className="page-heading" data-reveal>
-      <div>
-        <span className="eyebrow">{eyebrow}</span>
-        <h1 data-page-heading tabIndex={-1}>{title}</h1>
-        <p>{description}</p>
-      </div>
-      {right && <div className="heading-action">{right}</div>}
-    </div>
-  );
-}
-
-function StateTabs<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string }[]; onChange: (next: T) => void; label: string }) {
-  return (
-    <div className="segmented" role="group" aria-label={label}>
-      {options.map((option) => (
-        <button type="button" key={option.id} aria-pressed={value === option.id} className={value === option.id ? "active" : ""} onClick={() => onChange(option.id)}>
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function TodayPage({ compactDate, onRisk, onStrategy, onCandidate, today, todayLoading, risk, strategy }: { compactDate: string; onRisk: () => void; onStrategy: () => void; onCandidate: (candidate: Candidate) => void; today: ResearchResponse<TodayData>; todayLoading: boolean; risk: ResearchResponse<RiskData>; strategy: ResearchResponse<StrategyData> }) {
-  const dataState = researchStatus(todayLoading, today);
-  const riskSnapshot = today.data.riskSnapshot ?? risk.data.snapshot;
-  const scenario = {
-    score: researchValue(riskSnapshot, "score"), stage: researchValue(riskSnapshot, "stageLabel"), summary: researchValue(riskSnapshot, "summary"), action: researchValue(riskSnapshot, "actionText"),
-    coefficient: researchValue(riskSnapshot, "riskCoefficientPct"), exposure: researchValue(riskSnapshot, "exposureConstraintPct"),
-    killSwitch: { hitCount: researchValue(riskSnapshot, "killConditionHitCount"), total: researchValue(riskSnapshot, "killConditionTotalCount") },
-  };
-  const allCandidates = (today.data.strategyCandidates.length ? today.data.strategyCandidates : strategy.data.candidates).map(toCandidate);
-  const todayCandidates = [
-    ...allCandidates.filter((item) => item.view === "official"),
-    allCandidates.find((item) => item.view === "near"),
-  ].filter(Boolean) as Candidate[];
-  const signalState = researchDisplayState(dataState, todayCandidates.length);
-  const scrollToIntel = () => document.getElementById("today-intelligence")?.scrollIntoView({ behavior: "smooth", block: "start" });
-
-  return (
-    <div className="page-stack" data-research-status={dataState}>
-      <PageHeading
-        eyebrow={`TODAY'S BRIEF · ${compactDate}`}
-        title="收盘之后，先做明天的减法"
-        description="把市场风险、规则信号、公开信息和关键事件整理成一张研究台。"
-        right={<span className="status-label">{dataState}</span>}
-      />
-
-      {dataState === "partial" && <div className="state-banner warning" data-reveal><Clock size={17} /><span><b>当前批次部分缺失。</b>可用风险、信号和公开内容会照常展示；缺失字段以 XX 呈现。</span></div>}
-      {dataState === "missing" && <div className="state-banner warning" data-reveal><CircleAlert size={17} /><span><b>当前日期暂无研究批次。</b>页面不会用旧批次数据替代。</span></div>}
-      {dataState === "failed" && <div className="state-banner warning" data-reveal><CircleAlert size={17} /><span><b>研究数据请求失败。</b>请稍后刷新。</span></div>}
-
-      <section className="today-hero" data-reveal>
-        <button type="button" className={`risk-overview tone-${dataState}`} onClick={onRisk}>
-          <div className="risk-overview-top">
-            <span><ShieldAlert size={18} /> 风险总览</span>
-            <span className="link-label">查看 {risk.data.signals.length} 项证据 <ChevronRight size={15} /></span>
-          </div>
-          <div className="risk-overview-main">
-            <div className="score-orbit" style={{ "--score": scenario.score } as React.CSSProperties}>
-              <span>{scenario.score}</span><small>RiskScore</small>
-            </div>
-            <div>
-              <span className="status-label">{scenario.stage}</span>
-              <h2>{scenario.summary}</h2>
-              <p>{scenario.action}</p>
-            </div>
-          </div>
-          <div className="risk-metrics">
-            <span>状态系数 <b>{scenario.coefficient}</b></span>
-            <span>模型约束值 <b>{scenario.exposure}</b></span>
-            <span>极端风险阈值 <b>{scenario.killSwitch.hitCount}/{scenario.killSwitch.total}</b></span>
-          </div>
-        </button>
-
-        <div className="three-lines surface-card">
-          <div className="section-title"><span><Zap size={17} /> 今日三句话</span><small>先结论，后证据</small></div>
-          <ol>{rows(today.data.snapshot?.summaryPoints).length ? rows(today.data.snapshot?.summaryPoints).map(([label, copy], index) => <li key={`${label}-${index}`}><span>0{index + 1}</span><p><b>{label}：</b>{copy}</p></li>) : <li><span>01</span><p><b>研究状态：</b>{dataState === "failed" ? "数据请求失败，请稍后刷新。" : "当前批次暂无可展示摘要。"}</p></li>}</ol>
-        </div>
-      </section>
-
-      <section className="surface-card candidates-preview" data-reveal>
-        <div className="section-title">
-          <div><span><TrendingUp size={17} /> 今日策略信号</span><small>规则命中 {researchValue(today.data.strategyRun ?? strategy.data.run, "officialCandidateCount")} · 临近阈值 {researchValue(today.data.strategyRun ?? strategy.data.run, "nearCandidateCount")}</small></div>
-          <button type="button" className="text-button" onClick={onStrategy}>查看完整漏斗 <ChevronRight size={15} /></button>
-        </div>
-        {signalState === "pending" ? (
-          <LoadingBlock label="正在计算全市场筛选漏斗…" />
-        ) : signalState === "missing" || signalState === "failed" ? (
-          <StatusBlock icon={<CircleAlert size={22} />} title={signalState === "failed" ? "策略数据请求失败" : "当前日期暂无策略批次"} description="页面不会把不可用数据描述为零结果。" />
-        ) : signalState === "empty" ? (
-          <EmptyBlock title="今日没有规则命中样本" description={`策略已完成 ${researchValue(today.data.strategyRun ?? strategy.data.run, "marketSampleCount")} 只股票筛选；当前不以临近阈值样本填充结果。`} action="查看临近阈值" onAction={onStrategy} />
-        ) : keepsAvailableResearchRows(signalState) ? (
-          <div className="preview-grid">
-            {todayCandidates.map((item, index) => (
-              <button type="button" className="candidate-tile" key={item.id} onClick={() => onCandidate(item)}>
-                <span className="rank">0{index + 1}</span>
-                <div className="candidate-name"><h3>{item.name}{item.view === "near" && <em className="near-badge">临近阈值</em>}</h3><span>{item.code}</span></div>
-                <div className="price-line"><b>¥{item.close}</b><span className="stock-up">{item.change}</span></div>
-                <p>{item.setup}</p>
-                <div className="tile-bottom"><span>{item.sector}</span><b>匹配 {item.score}</b></div>
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="today-lower-grid" data-reveal>
-        <div className="surface-card intel-preview">
-          <div className="section-title">
-            <div><span><FileText size={17} /> 公开内容重要变化</span><small>不是热榜，是观点与关注度的变化</small></div>
-            <button type="button" className="text-button" onClick={scrollToIntel}>全部 {today.data.intelItems.length} 条 <ChevronRight size={15} /></button>
-          </div>
-          {today.data.intelItems.slice(0, 3).map((source) => {
-            const item: IntelItem = { id: researchValue(source, "id"), author: researchValue(source, "authorName"), avatar: researchValue(source, "authorName").slice(0, 1), kind: researchValue(source, "contentKind"), action: researchValue(source, "attentionAction"), sector: researchValue(source, "sector"), time: researchValue(source, "publishedAt"), title: researchValue(source, "title"), body: researchValue(source, "bodySummary"), change: researchValue(source, "changeSummary"), importance: researchValue(source, "importance") };
-            return (
-            <button type="button" className="intel-row" key={item.id} onClick={scrollToIntel}>
-              <span className="creator-avatar">{item.avatar}</span>
-              <span className="intel-copy"><span><b>{item.author}</b><em>{item.kind}</em></span><strong>{item.title}</strong><small>{item.change}</small></span>
-              <ChevronRight size={16} />
-            </button>);
-          })}
-        </div>
-
-        <div className="surface-card event-preview">
-          <div className="section-title"><div><span><Clock size={17} /> 本月大事件</span><small>事件 → 板块 → 观察标的</small></div></div>
-          <div className="mini-timeline">{(today.data.events.length ? today.data.events : [{}]).slice(0, 3).map((event, index) => <div className={`event-item ${index === 0 ? "past" : ""}`} key={researchValue(event, "id")}><time>{researchValue(event, "eventDate")}</time><span><b>{researchValue(event, "title")}</b><small>{researchValue(event, "summary")}</small></span></div>)}</div>
-        </div>
-      </section>
-      <IntelSection response={today} loading={todayLoading} />
     </div>
   );
 }
@@ -525,291 +333,6 @@ function KillSwitchPanel({ kill }: { kill: { hitCount: string; total: string; tr
       </div>
       <p className="kill-note">仅当数据库返回的全部条件同时满足，页面才显示“已触发”。</p>
     </div>
-  );
-}
-
-function StrategyPage({ selected, onSelected, compactDate, response, loading }: { selected: Candidate | null; onSelected: (item: Candidate | null) => void; compactDate: string; response: ResearchResponse<StrategyData>; loading: boolean }) {
-  const [view, setView] = useState<StrategyView>(selected?.view ?? "official");
-  const [sector, setSector] = useState("全部板块");
-  const responseState = researchStatus(loading, response);
-  const runState = responseState === "ready" ? (response.data.candidates.length ? "ready" : "empty") : responseState;
-  const candidates = response.data.candidates.map(toCandidate).filter((item) => item.view === view && (sector === "全部板块" || item.sector === sector));
-  const strategy = response.data.definition;
-  const sectors = ["全部板块", ...Array.from(new Set(response.data.candidates.map((item) => researchValue(item, "industry")).filter((item) => item !== "XX")))];
-
-  return (
-    <div className="page-stack" data-research-status={researchStatus(loading, response)}>
-      <PageHeading
-        eyebrow={`STRATEGY SCREEN · ${compactDate}`}
-        title="策略信号观察"
-        description="展示标准化规则如何形成命中样本；结果每天收盘后统一更新。"
-        right={<span className="status-label">{researchStatus(loading, response)}</span>}
-      />
-
-      <section className="strategy-intro" data-reveal>
-        <div className="strategy-title-card">
-          <span className="strategy-index">{researchValue(strategy, "strategyCode")}</span>
-          <div><h2>{researchValue(strategy, "name")}</h2><p>{researchValue(strategy, "description")}</p></div>
-          <div className="strategy-tags">{Object.entries(record(strategy?.rules)).map(([key, value]) => <span key={key}>{displayValue(value)}</span>)}</div>
-        </div>
-        <div className="simplified-rule surface-card">
-          <span>规则路径</span>
-          <p>{Object.entries(record(strategy?.rules)).map(([step, value], index) => <span key={step}>{index > 0 && <b>→</b>}{displayValue(value)}</span>)}</p>
-        </div>
-      </section>
-
-      {runState === "pending" && <RunningStrategy run={response.data.run} />}
-      {runState === "partial" && <StatusBlock icon={<CircleAlert size={22} />} title="策略数据部分缺失" description="可用漏斗和候选记录会照常展示，缺失字段显示 XX。" />}
-      {runState === "missing" && <StatusBlock icon={<CircleAlert size={22} />} title="当前日期暂无策略批次" description="页面不会用旧批次或静态样本填充结果。" />}
-      {runState === "failed" && <StatusBlock icon={<CircleAlert size={22} />} title="策略数据请求失败" description="请稍后刷新后重试。" />}
-
-      {keepsAvailableResearchRows(runState) || runState === "empty" ? (
-        <>
-          <StrategyFunnel response={response} />
-          <section className="surface-card candidate-section" data-reveal>
-            <div className="candidate-toolbar">
-              <StateTabs
-                label="信号类型"
-                value={view}
-                onChange={setView}
-                options={[{ id: "official", label: `规则命中 ${researchValue(response.data.run, "officialCandidateCount")}` }, { id: "near", label: `临近阈值 ${researchValue(response.data.run, "nearCandidateCount")}` }]}
-              />
-              <label className="select-control"><span>板块</span><select value={sector} onChange={(event) => setSector(event.target.value)}>{sectors.map((item) => <option key={item}>{item}</option>)}</select></label>
-            </div>
-            {runState === "empty" ? (
-              <EmptyBlock title="筛选已完成，今日 0 个规则命中样本" description="所有层级均保留真实通过数量。零结果不会自动放宽阈值，也不会用临近阈值样本替代规则命中。" />
-            ) : candidates.length === 0 ? (
-              <EmptyBlock title="当前板块没有结果" description="更换板块或查看全部板块；策略阈值没有因为筛选条件改变。" action="清除板块筛选" onAction={() => setSector("全部板块")} />
-            ) : (
-              <CandidateTable items={candidates} onOpen={onSelected} />
-            )}
-          </section>
-        </>
-      ) : null}
-
-      {selected && <EvidenceDrawer candidate={selected} onClose={() => onSelected(null)} />}
-    </div>
-  );
-}
-
-function StrategyFunnel({ response }: { response: ResearchResponse<StrategyData> }) {
-  const steps = response.data.funnel.map((item) => [researchValue(item, "stepName"), researchValue(item, "passedCount")]);
-  return (
-    <section className="surface-card strategy-funnel" data-reveal>
-      <div className="section-title"><div><span><ListFilter size={17} /> 今日筛选漏斗</span><small>每一步都可解释，零结果也保留</small></div><span className="batch-label">批次 {displayValue(response.batchId)}</span></div>
-      <div className="funnel-steps">
-        {steps.map(([label, count], index) => (
-          <div key={label} style={{ "--step": index } as React.CSSProperties}><span>{label}</span><b>{count}</b>{index < steps.length - 1 && <ChevronRight size={16} />}</div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function CandidateTable({ items, onOpen }: { items: Candidate[]; onOpen: (item: Candidate) => void }) {
-  return (
-    <div className="candidate-table-wrap">
-      <table className="candidate-table">
-        <thead><tr><th>规则样本</th><th>收盘数据</th><th>关键信号</th><th>匹配度</th><th /></tr></thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td><div className="table-stock"><b>{item.name}</b><span>{item.code} · {item.sector}</span></div></td>
-              <td><b>¥{item.close}</b><span className="stock-up">{item.change}</span></td>
-              <td><div className="signal-tags">{item.tableSignals.map(([label, value]) => <span key={label}>{label} {value}</span>)}</div><small>{item.setup}</small></td>
-              <td><div className="match-score"><span><i style={{ width: `${item.score}%` }} /></span><b>{item.score}</b></div></td>
-              <td><button type="button" className="row-action" onClick={() => onOpen(item)}>查看证据 <ChevronRight size={15} /></button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="candidate-mobile-list">
-        {items.map((item) => (
-          <button type="button" className="candidate-mobile-card" key={item.id} onClick={() => onOpen(item)}>
-            <div><span><b>{item.name}</b><small>{item.code}</small></span><span><b>¥{item.close}</b><em className="stock-up">{item.change}</em></span></div>
-            <p>{item.reason}</p>
-            <footer><span>{item.sector} · {item.setup}</span><b>匹配 {item.score}</b></footer>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function useAccessibleOverlay<T extends HTMLElement>(onDismiss: () => void, dismissible = true) {
-  const overlayRef = useRef<T>(null);
-  const dismissRef = useRef(onDismiss);
-
-  useEffect(() => {
-    dismissRef.current = onDismiss;
-  }, [onDismiss]);
-
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    if (!overlay) return;
-
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const pageStack = overlay.closest(".page-stack");
-    const overlayLayer = overlay.parentElement;
-    const appFrame = overlayLayer?.parentElement?.classList.contains("app-frame") ? overlayLayer.parentElement : null;
-    const backgroundTargets = Array.from(new Set([
-      ...(appFrame
-        ? Array.from(appFrame.children).filter((item) => !item.contains(overlay)) as HTMLElement[]
-        : [
-            ...document.querySelectorAll<HTMLElement>(".site-header, .product-statusbar, .mobile-nav"),
-            ...Array.from(pageStack?.children ?? []).filter((item) => !item.contains(overlay)) as HTMLElement[],
-          ]),
-    ]));
-    const previousStates = backgroundTargets.map((item) => ({
-      item,
-      inert: item.inert,
-      ariaHidden: item.getAttribute("aria-hidden"),
-    }));
-    const previousOverflow = document.body.style.overflow;
-
-    backgroundTargets.forEach((item) => {
-      item.inert = true;
-      item.setAttribute("aria-hidden", "true");
-    });
-    document.body.style.overflow = "hidden";
-
-    const getFocusable = () => Array.from(overlay.querySelectorAll<HTMLElement>(
-      "button:not([disabled]), [href], select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])",
-    )).filter((item) => item.getClientRects().length > 0);
-
-    (getFocusable()[0] ?? overlay).focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && dismissible) {
-        event.preventDefault();
-        dismissRef.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = getFocusable();
-      if (!focusable.length) {
-        event.preventDefault();
-        overlay.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-
-    return () => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      previousStates.forEach(({ item, inert, ariaHidden }) => {
-        item.inert = inert;
-        if (ariaHidden === null) item.removeAttribute("aria-hidden");
-        else item.setAttribute("aria-hidden", ariaHidden);
-      });
-      document.body.style.overflow = previousOverflow;
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }, [dismissible]);
-
-  return overlayRef;
-}
-
-function EvidenceDrawer({ candidate, onClose }: { candidate: Candidate; onClose: () => void }) {
-  const drawerRef = useAccessibleOverlay<HTMLElement>(onClose);
-  return (
-    <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside ref={drawerRef} tabIndex={-1} className="evidence-drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-title">
-        <header><span className="eyebrow">EVIDENCE · 当前批次</span><button type="button" className="icon-button" aria-label="关闭证据抽屉" onClick={onClose}><X size={19} /></button></header>
-        <div className="drawer-stock"><div><h2 id="evidence-title">{candidate.name}</h2><span>{candidate.code} · {candidate.market} · {candidate.sector}</span></div><div><b>¥{candidate.close}</b><span className="stock-up">{candidate.change}</span></div></div>
-        <div className="evidence-verdict"><CircleCheck size={20} /><span><b>{candidate.setup}</b><p>{candidate.reason}</p></span></div>
-        <h3>命中依据</h3>
-        <div className="evidence-list">
-          {candidate.evidence.map(([label, value, status]) => (
-            <div key={`${label}-${value}`}><span>{status === "通过" ? <Check size={16} /> : <CircleAlert size={16} />}{label}</span><b>{value}</b><em>{status}</em></div>
-          ))}
-        </div>
-        <div className="drawer-metrics">{candidate.metrics.map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
-        <div className="drawer-note"><CircleAlert size={17} /><p>该页面仅展示标准化规则如何形成命中样本，不构成证券投资咨询或个性化投资建议。</p></div>
-        <button type="button" className="primary-button full" onClick={onClose}>我已看完证据</button>
-      </aside>
-    </div>
-  );
-}
-
-function RunningStrategy({ run }: { run: ResearchRecord | null }) {
-  const progress = Number(researchValue(run, "progressPct"));
-  const progressWidth = Number.isFinite(progress) ? `${Math.max(0, Math.min(100, progress))}%` : "0%";
-  return (
-    <div className="surface-card running-strategy">
-      <LoaderCircle className="spin" size={24} /><div><h3>{researchValue(run, "runStatus")}</h3><p>{researchValue(run, "processedCount")} / {researchValue(run, "marketSampleCount")}</p><span><i style={{ width: progressWidth }} /></span></div><b>{researchValue(run, "progressPct")}</b>
-    </div>
-  );
-}
-
-function IntelSection({ response, loading }: { response: ResearchResponse<TodayData>; loading: boolean }) {
-  const [author, setAuthor] = useState("全部作者");
-  const [action, setAction] = useState("全部标签");
-  const [sector, setSector] = useState("全部板块");
-  const dataState = researchStatus(loading, response);
-  const sourceItems = useMemo(
-    () => response.data.intelItems.map((item) => ({ id: researchValue(item, "id"), author: researchValue(item, "authorName"), avatar: researchValue(item, "authorName").slice(0, 1), kind: researchValue(item, "contentKind"), action: researchValue(item, "attentionAction"), sector: researchValue(item, "sector"), time: researchValue(item, "publishedAt"), title: researchValue(item, "title"), body: researchValue(item, "bodySummary"), change: researchValue(item, "changeSummary"), importance: researchValue(item, "importance") })),
-    [response.data.intelItems],
-  );
-  const items = useMemo(
-    () => sourceItems.filter((item) => (author === "全部作者" || item.author === author) && (action === "全部标签" || item.action === action) && (sector === "全部板块" || item.sector === sector)),
-    [sourceItems, author, action, sector],
-  );
-  const operationCounts = useMemo(() => ({
-    add: sourceItems.filter((item) => item.action === "关注提升").length,
-    reduce: sourceItems.filter((item) => item.action === "关注降低").length,
-  }), [sourceItems]);
-
-  return (
-    <section id="today-intelligence" className="today-intelligence-block" aria-labelledby="today-intelligence-title" data-reveal>
-      <div className="page-heading section-heading">
-        <div><span className="eyebrow">DAILY INFORMATION BATCH</span><h2 id="today-intelligence-title">今日信息</h2><p>公开内容摘要、观点变化与市场总结，是今日决策台的一部分。</p></div>
-        <div className="heading-action"><span className="status-label">{dataState}</span></div>
-      </div>
-
-      <section className="batch-card surface-card">
-        <div><Database size={20} /><span><b>{displayValue(response.dataAsOf)} 夜间批次</b><small>批次号 {displayValue(response.batchId)}</small></span></div>
-        <dl><div><dt>数据日期</dt><dd>{displayValue(response.dataAsOf)}</dd></div><div><dt>数据状态</dt><dd>{dataState}</dd></div><div><dt>覆盖作者</dt><dd>{displayValue(response.data.intelItems.length)}</dd></div></dl>
-      </section>
-
-      {dataState === "partial" && <div className="state-banner warning"><Clock size={17} /><span><b>批次部分缺失：</b>当前仅展示本批可用内容。</span></div>}
-      {dataState === "partial" && <div className="state-banner warning"><CircleAlert size={17} /><span><b>部分来源缺失：</b>缺失字段以 XX 呈现，其余内容可正常浏览。</span></div>}
-
-      <section className="intel-summary-grid">
-        <div className="summary-card consensus"><span>今日共识</span><b>{displayValue(response.data.snapshot?.headline)}</b><p>{displayValue(response.data.snapshot?.summary)}</p></div>
-        <div className="summary-card divergence"><span>最大分歧</span><b>{displayValue(response.data.snapshot?.divergenceHeadline)}</b><p>{displayValue(response.data.snapshot?.divergenceSummary)}</p></div>
-        <div className="summary-card operations"><span>关注变化</span><b><i>{operationCounts.add} 提升</i> · {operationCounts.reduce} 降低</b><p>{dataState === "ready" ? "汇总当前研究批次的作者观点变化。" : "仅统计当前可用来源。"}</p></div>
-      </section>
-
-      <section className="surface-card intel-feed-card">
-        <div className="intel-filters">
-          <label><span>作者</span><select value={author} onChange={(event) => setAuthor(event.target.value)}>{["全部作者", ...Array.from(new Set(sourceItems.map((item) => item.author)))].map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label><span>观点标签</span><select value={action} onChange={(event) => setAction(event.target.value)}>{["全部标签", ...Array.from(new Set(sourceItems.map((item) => item.action)))].map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label><span>板块</span><select value={sector} onChange={(event) => setSector(event.target.value)}>{["全部板块", ...Array.from(new Set(sourceItems.map((item) => item.sector)))].map((item) => <option key={item}>{item}</option>)}</select></label>
-          <span className="result-count">{items.length} 条结果</span>
-        </div>
-        {items.length ? (
-          <div className="intel-feed">
-            {items.map((item) => (
-              <article className="feed-item" key={item.id}>
-                <div className="feed-author"><span className="creator-avatar">{item.avatar}</span><div><b>{item.author}</b><small>{item.time} · 公开内容摘要 · 虚构演示作者</small></div></div>
-                <div className="feed-content"><div className="feed-tags"><span className={`kind kind-${item.action}`}>{item.kind}</span><span>{item.sector}</span><em>重要度 {item.importance}</em></div><h2>{item.title}</h2><p>{item.body}</p><footer><RefreshCw size={14} />{item.change}</footer></div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <EmptyBlock title="没有匹配的信息" description="当前三个筛选条件没有交集，请减少筛选项后重试。" action="清除筛选" onAction={() => { setAuthor("全部作者"); setAction("全部标签"); setSector("全部板块"); }} />
-        )}
-      </section>
-    </section>
   );
 }
 
@@ -986,16 +509,4 @@ function PaymentDialog({ planLabel, price, expiresAt, autoRenew, state, onClose,
       </div>
     </div>
   );
-}
-
-function LoadingBlock({ label }: { label: string }) {
-  return <div className="loading-block" role="status"><LoaderCircle className="spin" size={22} /><span>{label}</span><div><i /><i /><i /></div></div>;
-}
-
-function EmptyBlock({ title, description, action, onAction }: { title: string; description: string; action?: string; onAction?: () => void }) {
-  return <div className="empty-block"><span><FileText size={24} /></span><h3>{title}</h3><p>{description}</p>{action && <button type="button" className="secondary-button" onClick={onAction}>{action}</button>}</div>;
-}
-
-function StatusBlock({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
-  return <div className="surface-card status-block"><span>{icon}</span><div><h3>{title}</h3><p>{description}</p></div></div>;
 }

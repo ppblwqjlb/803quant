@@ -44,3 +44,8 @@ next-env.d.ts
 /work/
 /.worktrees/
 /.codex_tmp/
+
+# local development logs
+/dev-server.log
+/db-tunnel.log
+/schema-audit.log

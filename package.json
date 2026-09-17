@@ -11,6 +11,7 @@
     "start": "node .next/standalone/server.js",
     "postbuild": "node scripts/prepare-standalone.mjs",
     "db:audit": "node --conditions=react-server --import tsx scripts/audit-mysql-schema.mjs",
+    "db:tunnel": "node --env-file=.env scripts/db-tunnel.mjs",
     "strategy:dry-run": "node --import tsx scripts/run-momentum-strategy.mjs",
     "test": "npm run test:unit && npm run build && node --test tests/rendered-html.test.mjs",
     "test:unit": "node --import tsx --test tests/ipo-render.test.tsx tests/ipo-adapters.test.mjs tests/momentum-strategy.test.mjs tests/motion-model.test.mjs tests/mysql-boundary.test.mjs tests/orbit-model.test.mjs tests/prototype-*.test.mjs tests/research-request-gate.test.mjs tests/research-repositories.test.mjs tests/research-routes.test.mjs",
@@ -27,10 +28,11 @@
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
-    "@types/react": "^19.2.14",
+    "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
+    "ssh2": "1.17.0",
     "tailwindcss": "4.2.1",
     "tsx": "4.23.12",
     "typescript": "5.9.3"

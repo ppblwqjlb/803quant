@@ -89,10 +89,13 @@ test("social preview metadata reports the shipped PNG dimensions", async () => {
 });
 
 test("the production page exposes a brand homepage and five product pages", async () => {
-  const [page, layout, app, home, orbit, countUp, motionController, css, browserSmoke, readme] = await Promise.all([
+  const [page, layout, app, todayPage, strategyPage, uiBlocks, home, orbit, countUp, motionController, css, browserSmoke, readme] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/prototype-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/today-page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/strategy-page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ui-blocks.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/home-page.tsx", import.meta.url), "utf8").catch(() => ""),
     readFile(new URL("../app/decision-orbit.tsx", import.meta.url), "utf8").catch(() => ""),
     readFile(new URL("../app/count-up-value.tsx", import.meta.url), "utf8").catch(() => ""),
@@ -156,7 +159,7 @@ test("the production page exposes a brand homepage and five product pages", asyn
   assert.match(motionController, /prefers-reduced-motion/);
   assert.match(app, /<MotionController\s*\/>/);
   assert.ok((home.match(/data-reveal/g) ?? []).length >= 16, "homepage should reveal its major copy, rows, and cards");
-  assert.ok((app.match(/data-reveal/g) ?? []).length >= 16, "all product pages should declare reveal sections");
+  assert.ok(((app + todayPage + strategyPage).match(/data-reveal/g) ?? []).length >= 16, "all product pages should declare reveal sections");
   assert.doesNotMatch(home, /<section className="home-hero"[^>]*data-reveal/);
   assert.doesNotMatch(app, /<header className="site-header"[^>]*data-reveal/);
   assert.doesNotMatch(app, /<div className="product-statusbar"[^>]*data-reveal/);
@@ -209,9 +212,9 @@ test("the production page exposes a brand homepage and five product pages", asyn
   assert.match(css, new RegExp(`${baseCtaScope}[^}]*${bottomCtaScope}[^}]*transition:\\s*none[^}]*transform:\\s*none`, "s"));
   assert.doesNotMatch(css, /\.home-page \.primary-action(?:\s*,|\s*\{|:hover)/);
   assert.match(css, /\.candidate-table th\s*\{[^}]*font-size:\s*var\(--text-meta\)/s);
-  assert.match(app, /\.site-header, \.product-statusbar, \.mobile-nav/);
+  assert.match(uiBlocks, /\.site-header, \.product-statusbar, \.mobile-nav/);
   assert.match(app, /aria-label=\{mobileMenuOpen \? "关闭产品导航" : "打开产品导航"\}/);
-  assert.match(app, /event\.key === "Escape"/);
+  assert.match(app + uiBlocks, /event\.key === "Escape"/);
   assert.match(app, /id="product-navigation"/);
   assert.match(app, /mobileMenuButtonRef/);
   assert.match(app, /productNavRef/);
@@ -229,7 +232,11 @@ test("the production page exposes a brand homepage and five product pages", asyn
 });
 
 test("risk and strategy research are directly accessible", async () => {
-  const app = await readFile(new URL("../app/prototype-app.tsx", import.meta.url), "utf8");
+  const [app, strategyPage, uiBlocks] = await Promise.all([
+    readFile(new URL("../app/prototype-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/strategy-page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ui-blocks.tsx", import.meta.url), "utf8"),
+  ]);
 
   assert.match(app, /window\.history\.pushState/);
   assert.match(app, /window\.addEventListener\("popstate", syncHash\)/);
@@ -240,12 +247,12 @@ test("risk and strategy research are directly accessible", async () => {
   assert.match(app, /803-2026-VIP/);
   assert.match(app, /type RedeemState = "idle" \| "validating" \| "success" \| "invalid"/);
   assert.match(app, /兑换码无效或已失效/);
-  assert.match(app, /overlayLayer\?\.parentElement\?\.classList\.contains\("app-frame"\)/);
+  assert.match(uiBlocks, /overlayLayer\?\.parentElement\?\.classList\.contains\("app-frame"\)/);
   assert.doesNotMatch(app, /strategyId|strategy-selector|strategy-option|策略 02|好公司估值修复|quality/);
-  assert.match(app, /strategyCode/);
+  assert.match(strategyPage, /run\.strategyCode/);
 });
 
-test("daily intelligence is merged into the current product navigation", async () => {
+test("the today console composes the macro dashboard and strategy pages", async () => {
   const [app, home] = await Promise.all([
     readFile(new URL("../app/prototype-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/home-page.tsx", import.meta.url), "utf8"),
@@ -255,10 +262,11 @@ test("daily intelligence is merged into the current product navigation", async (
     assert.match(app, new RegExp(label));
   }
   assert.doesNotMatch(app, /id: "intel"/);
-  assert.match(app, /id="today-intelligence"/);
-  assert.match(app, /<IntelSection/);
-  assert.match(app, /today\.data\.events/);
-  assert.match(app, /researchValue\(event, "eventDate"\)/);
+  assert.match(app, /<TodayPage/);
+  assert.match(app, /<StrategyPage/);
+  assert.match(app, /emptyTodayResearchData/);
+  assert.match(app, /emptyStrategyResearchData/);
+  assert.match(app, /今日决策台/);
   assert.match(home, /id: "ipo"/);
 });
 

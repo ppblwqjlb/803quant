@@ -1,89 +1,198 @@
 import type { ResearchResponse } from "../../research/contracts.ts";
 import {
-  defaultQueryRows,
+  compactDateOrNull,
+  dataResponse,
+  dataStatus,
   decodeJsonArray,
-  decodeJsonObject,
-  errorResponse,
-  finalStatus,
-  findCurrentBatch,
+  defaultQueryRows,
   getRepositoryContext,
-  initialState,
-  response,
+  integerOrZero,
+  isJsonObjectItem,
+  marketBatch,
+  numberOrNull,
+  textOrNull,
   type QueryRows,
   type RepositoryOptions,
 } from "./repository-helpers.ts";
 
-export type StrategyDefinition = Record<string, unknown> & {
-  id: number;
-  strategyCode: "momentum-gap-volume";
-  rules: unknown;
-};
-export type StrategyRun = Record<string, unknown> & {
-  id: number;
-  strategyDefinitionId: number;
-  officialCandidateCount: number | null;
-  nearCandidateCount: number | null;
-};
-export type StrategyFunnel = Record<string, unknown> & {
-  stepCode: string;
-  passedCount: number;
-  sortOrder: number;
-};
-export type StrategyCandidate = Record<string, unknown> & {
-  id: number;
-  candidateType: "official" | "near";
-  tsCode: string | null;
-  evidence: unknown;
-};
-export type StrategyData = {
-  definition: StrategyDefinition | null;
-  run: StrategyRun | null;
-  funnel: StrategyFunnel[];
-  candidates: StrategyCandidate[];
+export type StrategyStage = {
+  order: number;
+  code: string;
+  name: string;
+  stockCount: number;
 };
 
-export const emptyStrategyData = (): StrategyData => ({ definition: null, run: null, funnel: [], candidates: [] });
+export type StrategySignal = {
+  label: string | null;
+  value: string | null;
+};
+
+export type StrategyEvidence = {
+  label: string | null;
+  value: string | null;
+  status: string | null;
+};
+
+export type StrategyCandidate = {
+  tsCode: string;
+  name: string | null;
+  board: string | null;
+  industry: string | null;
+  evaluationDate: string;
+  signalDate: string;
+  close: number | null;
+  pctChg: number | null;
+  summary: string | null;
+  signals: StrategySignal[];
+  evidence: StrategyEvidence[];
+};
+
+export type StrategyRun = {
+  runId: number;
+  strategyCode: string;
+  strategyName: string | null;
+  evaluationDate: string;
+  paramsVersion: string | null;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  runtimeMs: number | null;
+  universeCount: number;
+  resultCount: number;
+};
+
+export type FailureStage = {
+  stage: string;
+  label: string;
+  count: number;
+};
+
+export type SignalHistoryItem = {
+  tsCode: string;
+  name: string | null;
+  board: string | null;
+  industry: string | null;
+  confirmationDate: string;
+  firstPublishedAt: string | null;
+  close: number | null;
+  pctChg: number | null;
+  summary: string | null;
+};
+
+export type StrategyData = {
+  run: StrategyRun | null;
+  funnel: StrategyStage[];
+  candidates: StrategyCandidate[];
+  failureStages: FailureStage[];
+  history: SignalHistoryItem[];
+};
+
+export const emptyStrategyData = (): StrategyData => ({
+  run: null,
+  funnel: [],
+  candidates: [],
+  failureStages: [],
+  history: [],
+});
+
+const STAGE_LABELS: Record<string, string> = {
+  universe: "全市场样本",
+  low_structure: "低位结构",
+  trial_confirm: "试盘确认",
+  gap_volume: "跳空放量",
+  three_bullish: "三连阳",
+  volume_rise: "放量上涨",
+  confirmation_date: "确认日期",
+};
 
 const RUN_SQL = `SELECT
-  id, strategy_definition_id AS strategyDefinitionId, trade_date AS tradeDate, run_status AS runStatus,
-  market_sample_count AS marketSampleCount, official_candidate_count AS officialCandidateCount,
-  near_candidate_count AS nearCandidateCount, runtime_ms AS runtimeMs, started_at AS startedAt,
-  completed_at AS completedAt, source_name AS sourceName, source_url AS sourceUrl,
-  source_published_at AS sourcePublishedAt, data_as_of AS dataAsOf
-FROM strategy_run
-WHERE research_batch_id = ?
-LIMIT 1`;
-
-const DEFINITION_SQL = `SELECT
-  id, strategy_code AS strategyCode, version, name, description, is_enabled AS isEnabled,
-  rules_json AS rules, effective_from AS effectiveFrom, effective_to AS effectiveTo,
-  source_name AS sourceName, source_url AS sourceUrl, source_published_at AS sourcePublishedAt,
-  data_as_of AS dataAsOf
-FROM strategy_definition
-WHERE id = ? AND strategy_code = ?
+  id,
+  strategy_code AS strategyCode,
+  strategy_name AS strategyName,
+  evaluation_date AS evaluationDate,
+  params_version AS paramsVersion,
+  status,
+  started_at AS startedAt,
+  completed_at AS completedAt,
+  universe_count AS universeCount,
+  result_count AS resultCount
+FROM risk_strategy_run
+WHERE status = 'success' AND evaluation_date <= ?
+ORDER BY evaluation_date DESC, id DESC
 LIMIT 1`;
 
 const FUNNEL_SQL = `SELECT
-  step_code AS stepCode, step_name AS stepName, passed_count AS passedCount, sort_order AS sortOrder,
-  source_name AS sourceName, source_url AS sourceUrl, source_published_at AS sourcePublishedAt,
-  data_as_of AS dataAsOf
-FROM strategy_funnel_result
-WHERE strategy_run_id = ?
-ORDER BY sort_order, id`;
+  stage_order AS stageOrder,
+  stage_code AS stageCode,
+  stage_name AS stageName,
+  stock_count AS stockCount
+FROM risk_strategy_funnel
+WHERE run_id = ?
+ORDER BY stage_order`;
 
-const CANDIDATES_SQL = `SELECT
-  candidate.id, candidate.candidate_type AS candidateType, candidate.rank_no AS rankNo,
-  candidate.match_score AS matchScore, candidate.close_price AS closePrice,
-  candidate.change_rate_pct AS changeRatePct, candidate.gap_rate_pct AS gapRatePct,
-  candidate.volume_ratio AS volumeRatio, candidate.setup_label AS setupLabel,
-  candidate.reason_text AS reasonText, candidate.evidence_json AS evidence,
-  stock.ts_code AS tsCode, stock.name, stock.market, stock.board, stock.industry,
-  candidate.source_name AS sourceName, candidate.source_url AS sourceUrl,
-  candidate.source_published_at AS sourcePublishedAt, candidate.data_as_of AS dataAsOf
-FROM strategy_candidate AS candidate
-JOIN stock_basic AS stock ON stock.id = candidate.stock_id
-WHERE candidate.strategy_run_id = ?
-ORDER BY candidate.candidate_type, candidate.rank_no, candidate.match_score DESC, candidate.id`;
+const CANDIDATE_SQL = `SELECT
+  ts_code AS tsCode,
+  name, board, industry,
+  evaluation_date AS evaluationDate,
+  signal_date AS signalDate,
+  close,
+  pct_chg AS pctChg,
+  summary,
+  signals_json AS signals,
+  evidence_json AS evidence
+FROM risk_strategy_result
+WHERE run_id = ?
+ORDER BY pct_chg DESC, ts_code ASC`;
+
+const FAILURE_SQL = `SELECT
+  failure_stage AS failureStage,
+  COUNT(*) AS stockCount
+FROM risk_strategy_stock_stage
+WHERE run_id = ? AND failure_stage IS NOT NULL
+GROUP BY failure_stage
+ORDER BY stockCount DESC`;
+
+const HISTORY_SQL = `SELECT
+  ts_code AS tsCode,
+  name, board, industry,
+  confirmation_date AS confirmationDate,
+  first_published_at AS firstPublishedAt,
+  close,
+  pct_chg AS pctChg,
+  summary
+FROM risk_strategy_signal_history
+WHERE confirmation_date <= ?
+ORDER BY confirmation_date DESC, id DESC
+LIMIT 20`;
+
+function asText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function toSignalList(value: unknown): StrategySignal[] {
+  return (decodeJsonArray(value) ?? []).flatMap((item) =>
+    isJsonObjectItem(item)
+      ? [{ label: asText(item.label), value: asText(item.value) }]
+      : [],
+  );
+}
+
+function toEvidenceList(value: unknown): StrategyEvidence[] {
+  return (decodeJsonArray(value) ?? []).flatMap((item) =>
+    isJsonObjectItem(item)
+      ? [{ label: asText(item.label), value: asText(item.value), status: asText(item.status) }]
+      : [],
+  );
+}
+
+function runtimeMilliseconds(startedAt: unknown, completedAt: unknown): number | null {
+  const start = typeof startedAt === "string" ? Date.parse(startedAt.replace(" ", "T")) : Number.NaN;
+  const end = typeof completedAt === "string" ? Date.parse(completedAt.replace(" ", "T")) : Number.NaN;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return Math.round(end - start);
+}
 
 export async function getStrategyResearch(
   query: QueryRows = defaultQueryRows,
@@ -94,52 +203,90 @@ export async function getStrategyResearch(
   try {
     const context = getRepositoryContext(options);
     serverDate = context.system.serverDate;
-    const batch = await findCurrentBatch(query, "strategy", context.tradeDate);
-    const early = initialState("strategy", serverDate, batch, empty);
-    if (early || !batch) return early!;
+    const requestedCompact = context.tradeDate.replaceAll("-", "");
 
-    const run = (await query<StrategyRun>(RUN_SQL, [batch.id]))[0] ?? null;
-    if (!run) {
-      const missingFields = ["strategy.run"];
-      return response(serverDate, "partial", empty, missingFields, batch);
+    const runRows = await query<Record<string, unknown>>(RUN_SQL, [requestedCompact]);
+    const runRow = runRows[0];
+    const runId = Number(runRow?.id);
+    if (!runRow || !Number.isSafeInteger(runId) || runId <= 0) {
+      return dataResponse(serverDate, "missing", empty, ["strategy.run"]);
     }
 
-    const [definitions, funnel, candidates] = await Promise.all([
-      query<StrategyDefinition>(DEFINITION_SQL, [run.strategyDefinitionId, "momentum-gap-volume"]),
-      query<StrategyFunnel>(FUNNEL_SQL, [run.id]),
-      query<StrategyCandidate>(CANDIDATES_SQL, [run.id]),
+    const evaluationDate = compactDateOrNull(runRow.evaluationDate) ?? requestedCompact;
+    const [funnelRows, candidateRows, failureRows, historyRows] = await Promise.all([
+      query<Record<string, unknown>>(FUNNEL_SQL, [runId]),
+      query<Record<string, unknown>>(CANDIDATE_SQL, [runId]),
+      query<Record<string, unknown>>(FAILURE_SQL, [runId]),
+      query<Record<string, unknown>>(HISTORY_SQL, [evaluationDate]),
     ]);
-    const rawDefinition = definitions[0] ?? null;
-    const rules = rawDefinition ? decodeJsonObject(rawDefinition.rules) : null;
-    const definition = rawDefinition ? { ...rawDefinition, rules } : null;
-    const normalizedCandidates = candidates.map((candidate) => ({
-      ...candidate,
-      evidence: decodeJsonArray(candidate.evidence),
+
+    const funnel: StrategyStage[] = funnelRows.map((row) => ({
+      order: integerOrZero(row.stageOrder),
+      code: String(row.stageCode ?? ""),
+      name: String(row.stageName ?? "XX"),
+      stockCount: integerOrZero(row.stockCount),
     }));
-    const data: StrategyData = { definition, run, funnel, candidates: normalizedCandidates };
-    const expectedCandidates = (run.officialCandidateCount ?? 0) + (run.nearCandidateCount ?? 0);
-    const funnelCodes = funnel.map((step) => typeof step.stepCode === "string" ? step.stepCode.trim() : "");
-    const funnelOrders = funnel.map((step) => String(step.sortOrder ?? ""));
-    const candidateIds = normalizedCandidates.map((candidate) => String(candidate.id ?? ""));
-    const candidateCodes = normalizedCandidates.map((candidate) => String(candidate.tsCode ?? "").trim());
+
+    const candidates: StrategyCandidate[] = candidateRows.map((row) => ({
+      tsCode: String(row.tsCode ?? "XX"),
+      name: textOrNull(row.name),
+      board: textOrNull(row.board),
+      industry: textOrNull(row.industry),
+      evaluationDate: String(row.evaluationDate ?? "XX"),
+      signalDate: String(row.signalDate ?? "XX"),
+      close: numberOrNull(row.close),
+      pctChg: numberOrNull(row.pctChg),
+      summary: textOrNull(row.summary),
+      signals: toSignalList(row.signals),
+      evidence: toEvidenceList(row.evidence),
+    }));
+
+    const failureStages: FailureStage[] = failureRows.map((row) => {
+      const stage = String(row.failureStage ?? "");
+      return { stage, label: STAGE_LABELS[stage] ?? stage, count: integerOrZero(row.stockCount) };
+    });
+
+    const history: SignalHistoryItem[] = historyRows.map((row) => ({
+      tsCode: String(row.tsCode ?? "XX"),
+      name: textOrNull(row.name),
+      board: textOrNull(row.board),
+      industry: textOrNull(row.industry),
+      confirmationDate: String(row.confirmationDate ?? "XX"),
+      firstPublishedAt: textOrNull(row.firstPublishedAt),
+      close: numberOrNull(row.close),
+      pctChg: numberOrNull(row.pctChg),
+      summary: textOrNull(row.summary),
+    }));
+
+    const run: StrategyRun = {
+      runId,
+      strategyCode: String(runRow.strategyCode ?? "XX"),
+      strategyName: textOrNull(runRow.strategyName),
+      evaluationDate,
+      paramsVersion: textOrNull(runRow.paramsVersion),
+      status: String(runRow.status ?? ""),
+      startedAt: textOrNull(runRow.startedAt),
+      completedAt: textOrNull(runRow.completedAt),
+      runtimeMs: runtimeMilliseconds(runRow.startedAt, runRow.completedAt),
+      universeCount: integerOrZero(runRow.universeCount),
+      resultCount: integerOrZero(runRow.resultCount),
+    };
+
     const missingFields = [
-      ...(data.definition ? [] : ["strategy.definition"]),
-      ...(definition && !rules ? ["strategy.definition.rules"] : []),
-      ...(funnel.length >= 5 ? [] : ["strategy.funnel.positions"]),
-      ...(funnelCodes.some((code) => !code) || new Set(funnelCodes).size !== funnelCodes.length
-        ? ["strategy.funnel.stepCode"] : []),
-      ...(funnelOrders.some((order) => !order) || new Set(funnelOrders).size !== funnelOrders.length
-        ? ["strategy.funnel.sortOrder"] : []),
-      ...(normalizedCandidates.length >= expectedCandidates ? [] : ["strategy.candidates"]),
-      ...(new Set(candidateIds).size !== candidateIds.length || candidateCodes.some((code) => !code) ||
-        new Set(candidateCodes).size !== candidateCodes.length ? ["strategy.candidates.identity"] : []),
-      ...normalizedCandidates
-        .filter((candidate) => !candidate.evidence)
-        .map((candidate) => `strategy.candidates.${candidate.id}.evidence`),
+      ...(funnel.length ? [] : ["strategy.funnel"]),
+      ...(candidates.length || run.resultCount === 0 ? [] : ["strategy.candidates"]),
+      ...(history.length ? [] : ["strategy.history"]),
     ];
-    return response(serverDate, finalStatus(batch, missingFields), data, missingFields, batch);
-  } catch (error) {
+
+    return dataResponse(
+      serverDate,
+      dataStatus(missingFields),
+      { run, funnel, candidates, failureStages, history },
+      missingFields,
+      marketBatch(evaluationDate),
+    );
+  } catch {
     if (!serverDate) serverDate = getRepositoryContext({ now: options.now }).system.serverDate;
-    return errorResponse("strategy", serverDate, empty, error);
+    return dataResponse(serverDate, "failed", empty, ["strategy.query"]);
   }
 }

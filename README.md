@@ -15,12 +15,16 @@
 
 要求 Node.js `>=22.13.0`。
 
+托管数据库只监听服务器本机回环地址，因此本地开发需要先把远端 MySQL 映射到本地端口：
+
 ```bash
 npm ci
-npm run dev
+# 从 .env.example 创建 .env，并填写 MYSQL_* 与 SSH_TUNNEL_*
+npm run db:tunnel    # 常驻运行，把远端 MySQL 暴露到 127.0.0.1:3306
+npm run dev          # 另开一个终端
 ```
 
-开发服务器启动后，打开终端输出的本地地址；Hash 路由可访问 `#home`、`#today`、`#risk`、`#strategy` 和 `#ipo`。
+开发服务器启动后，打开终端输出的本地地址；Hash 路由可访问 `#home`、`#today`、`#risk`、`#strategy`、`#ipo` 和 `#membership`。
 
 生产构建与本机启动：
 
@@ -34,9 +38,11 @@ npm run start
 ## 数据与日期原则
 
 - 页面标题中的“今日”由服务器按 `Asia/Shanghai` 生成；浏览器本机时间不参与该日期计算。
-- IPO 节点、信息发布时间和批次时间来自数据库，属于历史业务时间，不会被当天日期替换。
-- 数据库无最新成功批次、表或字段时，研究模块保留布局并显示 `XX` 与明确状态。
-- 策略页仅保留策略01：`momentum-gap-volume`；批处理默认只读演练，不会写入数据库。
+- 交易日期由 `daily` 的最新可用交易日推导，取值不晚于请求日期，批次号形如 `market-20260917`，页面同时展示实际数据日期，不会把旧数据当作当日数据。
+- 每个模块各自标注取数来源与来源自身的日期（例如 `margin_daily` 通常滞后一至两个交易日）。
+- 缺少某个数据源时，该模块保留布局并显示 `XX`，响应状态为 `partial`；完全没有可用交易日时状态为 `missing`；查询异常时状态为 `failed`，且不泄露驱动或连接细节。
+- 策略页展示数据库中已存在的 `startup_signal`（启动信号）批次，来源为 `risk_strategy_run`、`risk_strategy_funnel`、`risk_strategy_result`、`risk_strategy_stock_stage` 与 `risk_strategy_signal_history`。
+- 页面一律只读；数据入库由外部数据管道负责，本项目不执行任何写入、建表或迁移。
 - 会员购买和兑换仍为浏览器内原型演示，不是支付或账户系统。
 
 ## MySQL 配置
@@ -51,8 +57,14 @@ npm run start
 | `MYSQL_USER` | 网页服务只读账号 |
 | `MYSQL_PASSWORD` | 上述账号密码 |
 | `MYSQL_CONNECTION_LIMIT` | 连接池上限 |
+| `SSH_TUNNEL_HOST` / `SSH_TUNNEL_PORT` | 仅本地开发：跳板机地址与端口 |
+| `SSH_TUNNEL_USER` / `SSH_TUNNEL_PASSWORD` | 仅本地开发：跳板机账号 |
+| `SSH_TUNNEL_REMOTE_HOST` / `SSH_TUNNEL_REMOTE_PORT` | 仅本地开发：跳板机侧的 MySQL 地址 |
+| `SSH_TUNNEL_LOCAL_HOST` / `SSH_TUNNEL_LOCAL_PORT` | 仅本地开发：本地监听地址，需与 `MYSQL_HOST` / `MYSQL_PORT` 一致 |
 
-数据库结构草案只供评审，不会在本项目中自动执行。请先阅读 [建表授权说明](docs/database/mysql-research-schema-proposal.sql) 和 [页面字段映射](docs/database/frontend-table-map.md)。
+今日决策台与策略信号观察直接读取已部署的行情与研究表：`daily`、`daily_basic`、`adj_factor`、`index_basic`、`index_daily`、`limit_updown`、`margin_daily`、`call_auction`、`gold_oil`、`exchange_rate`、`foreign_index`、`ci_index_daily`、`ci_index_member`、`stock_basic` 以及 `risk_strategy_*` 系列。全部查询经过 `lib/server/sql-guard.ts` 的表名白名单与只读语法校验。
+
+风控提醒与 IPO 专题仍按 [建表授权说明](docs/database/mysql-research-schema-proposal.sql) 中的研究结果表设计，这些表尚未部署，因此对应模块当前显示 `XX` 与明确状态；[页面字段映射](docs/database/frontend-table-map.md) 与 [现有库结构盘点](docs/database/current-schema-audit.md) 保留了该设计说明，实际库结构以本机 `npm run db:audit` 的结果为准。
 
 ## 验证
 

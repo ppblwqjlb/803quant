@@ -168,3 +168,104 @@ export function initialState<T>(
 export function finalStatus(batch: BatchRow, missingFields: string[]): ResearchStatus {
   return batch.batchStatus === "partial" || missingFields.length > 0 ? "partial" : "ready";
 }
+
+/*
+ * Data-derived batch.
+ *
+ * The research pages read the approved raw market tables directly instead of a pre-computed
+ * `research_batch` row. The trade date is therefore resolved from `daily`, which carries every
+ * trading session, and the batch identity is derived from that resolved date.
+ */
+export type DataBatch = {
+  batchId: string;
+  compactTradeDate: string;
+  isoTradeDate: string;
+};
+
+export function isValidCompactDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{8}$/u.test(value);
+}
+
+export function toCompactDate(isoDate: string): string {
+  if (!isValidTradeDate(isoDate)) throw new Error("Invalid trade date");
+  return isoDate.replaceAll("-", "");
+}
+
+export function toIsoDate(value: unknown): string {
+  return isValidCompactDate(value)
+    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+    : "XX";
+}
+
+export function compactDateOrNull(value: unknown): string | null {
+  return isValidCompactDate(value) ? value : null;
+}
+
+export function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function integerOrZero(value: unknown): number {
+  const parsed = numberOrNull(value);
+  return parsed === null ? 0 : Math.round(parsed);
+}
+
+export function textOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+const LATEST_TRADE_DATE_SQL = `SELECT MAX(trade_date) AS latestTradeDate
+FROM daily
+WHERE trade_date <= ?`;
+
+const PREVIOUS_TRADE_DATE_SQL = `SELECT MAX(trade_date) AS previousTradeDate
+FROM daily
+WHERE trade_date < ?`;
+
+export async function findLatestTradeDate(query: QueryRows, requestedDate: string): Promise<string | null> {
+  const rows = await query<{ latestTradeDate: string | null }>(LATEST_TRADE_DATE_SQL, [toCompactDate(requestedDate)]);
+  return compactDateOrNull(rows[0]?.latestTradeDate);
+}
+
+export async function findPreviousTradeDate(query: QueryRows, compactTradeDate: string): Promise<string | null> {
+  const rows = await query<{ previousTradeDate: string | null }>(PREVIOUS_TRADE_DATE_SQL, [compactTradeDate]);
+  return compactDateOrNull(rows[0]?.previousTradeDate);
+}
+
+export function marketBatch(compactTradeDate: string): DataBatch {
+  return {
+    batchId: `market-${compactTradeDate}`,
+    compactTradeDate,
+    isoTradeDate: toIsoDate(compactTradeDate),
+  };
+}
+
+export function dataResponse<T>(
+  serverDate: string,
+  status: ResearchStatus,
+  data: T,
+  missingFields: string[],
+  batch: DataBatch | null = null,
+): ResearchResponse<T> {
+  return {
+    serverDate,
+    timezone: "Asia/Shanghai",
+    status,
+    batchId: batch?.batchId ?? null,
+    dataAsOf: batch?.isoTradeDate ?? null,
+    missingFields: [...new Set(missingFields)],
+    data,
+  };
+}
+
+export function dataStatus(missingFields: string[]): ResearchStatus {
+  return missingFields.length > 0 ? "partial" : "ready";
+}
+
+export function placeholdersFor(items: readonly unknown[]): string {
+  return items.map(() => "?").join(", ");
+}

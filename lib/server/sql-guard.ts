@@ -20,11 +20,15 @@ const FROM_CLAUSE_END = new Set([
 ]);
 
 export const APPROVED_APPLICATION_TABLES = new Set([
-  "adj_factor", "call_auction", "daily", "daily_basic", "daily_decision_snapshot", "external_market_quote",
-  "index_basic", "index_daily", "intel_item", "ipo_company", "ipo_metric_snapshot", "ipo_stage_event",
-  "ipo_subscription_analysis", "ipo_valuation_scenario", "market_event", "research_batch", "risk_signal_result",
-  "risk_snapshot", "stock_basic", "stock_limit_price", "strategy_candidate", "strategy_definition",
-  "strategy_funnel_result", "strategy_run", "trade_calendar",
+  "adj_factor", "call_auction", "ci_index_daily", "ci_index_member", "daily", "daily_basic",
+  "daily_decision_snapshot", "exchange_rate", "external_market_quote", "foreign_index",
+  "foreign_industry_index", "gold_oil", "index_basic", "index_daily", "intel_item",
+  "ipo_company", "ipo_metric_snapshot", "ipo_stage_event", "ipo_subscription_analysis",
+  "ipo_valuation_scenario", "limit_updown", "margin_daily", "market_event", "research_batch",
+  "risk_signal_result", "risk_snapshot", "risk_strategy_funnel", "risk_strategy_result",
+  "risk_strategy_run", "risk_strategy_signal_history", "risk_strategy_stock_stage", "stock_basic",
+  "stock_limit_price", "strategy_candidate", "strategy_definition", "strategy_funnel_result",
+  "strategy_run", "trade_calendar",
 ]);
 const APPROVED_METADATA_TABLES = new Set(["tables", "columns", "statistics"]);
 
